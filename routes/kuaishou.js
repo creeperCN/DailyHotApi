@@ -1,64 +1,63 @@
+/*
+ * @author: MCBBC
+ * @date: 2023-07-17
+ * @customEditors: imsyy
+ * @lastEditTime: 2023-07-17
+ */
+
 const Router = require("koa-router");
-const itHomeRouter = new Router();
+const kuaishouRouter = new Router();
 const axios = require("axios");
-const cheerio = require("cheerio");
 const { get, set, del } = require("../utils/cacheData");
 
 // 接口信息
 const routerInfo = {
-  name: "ithome",
-  title: "IT之家",
+  name: "kuaishou",
+  title: "快手",
   subtitle: "热榜",
 };
 
 // 缓存键名
-const cacheKey = "itHomeData";
+const cacheKey = "kuaishouData";
 
 // 调用时间
 let updateTime = new Date().toISOString();
 
 // 调用路径
-const url = "https://m.ithome.com/rankm/";
-const headers = {
-  "User-Agent":
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1",
-};
+const url = "https://www.kuaishou.com/?isHome=1";
 
-// it之家特殊处理 - url
-const replaceLink = (url) => {
-  const match = url.match(/[html|live]\/(\d+)\.htm/)[1];
-  return `https://www.ithome.com/0/${match.slice(0, 3)}/${match.slice(3)}.htm`;
+// Unicode 解码
+const decodedString = (encodedString) => {
+  return encodedString.replace(/\\u([\d\w]{4})/gi, (match, grp) =>
+    String.fromCharCode(parseInt(grp, 16)),
+  );
 };
 
 // 数据处理
 const getData = (data) => {
-  if (!data) return false;
+  if (!data) return [];
   const dataList = [];
-  const $ = cheerio.load(data);
   try {
-    $(".rank-name").each(() => {
-      const type = $(this).data("rank-type");
-      const newListHtml = $(this).next(".rank-box").html();
-      cheerio
-        .load(newListHtml)(".placeholder")
-        .get()
-        .map((v) => {
-          dataList.push({
-            title: $(v).find(".plc-title").text(),
-            img: $(v).find("img").attr("data-original"),
-            time: $(v).find(".post-time").text(),
-            type: $(this).text(),
-            typeName: type,
-            hot: Number($(v).find(".review-num").text().replace(/\D/g, "")),
-            url: replaceLink($(v).find("a").attr("href")),
-            mobileUrl: $(v).find("a").attr("href"),
-          });
-        });
-      // dataList[type] = {
-      //   name: $(this).text(),
-      //   total: newsList.length,
-      //   list: newsList,
-      // };
+    const pattern = /window.__APOLLO_STATE__=(.*);\(function\(\)/s;
+    const idPattern = /clientCacheKey=([A-Za-z0-9]+)/s;
+    const matchResult = data.match(pattern);
+    const jsonObject = JSON.parse(matchResult[1])["defaultClient"];
+
+    // 获取所有分类
+    const allItems = jsonObject['$ROOT_QUERY.visionHotRank({"page":"home"})']["items"];
+    // 遍历所有分类
+    allItems.forEach((v) => {
+      // 基础数据
+      const image = jsonObject[v.id]["poster"];
+      const id = image.match(idPattern)[1];
+      // 数据处理
+      dataList.push({
+        title: jsonObject[v.id]["name"],
+        pic: decodedString(image),
+        hot: jsonObject[v.id]["hotValue"],
+        url: `https://www.kuaishou.com/short-video/${id}`,
+        mobileUrl: `https://www.kuaishou.com/short-video/${id}`,
+      });
     });
     return dataList;
   } catch (error) {
@@ -67,18 +66,18 @@ const getData = (data) => {
   }
 };
 
-// IT之家热榜
-itHomeRouter.get("/ithome", async (ctx) => {
-  console.log("获取IT之家热榜");
+// 快手热榜
+kuaishouRouter.get("/kuaishou", async (ctx) => {
+  console.log("获取快手热榜");
   try {
     // 从缓存中获取数据
     let data = await get(cacheKey);
     const from = data ? "cache" : "server";
     if (!data) {
       // 如果缓存中不存在数据
-      console.log("从服务端重新获取IT之家热榜");
+      console.log("从服务端重新获取快手热榜");
       // 从服务器拉取数据
-      const response = await axios.get(url, { headers });
+      const response = await axios.get(url);
       data = getData(response.data);
       updateTime = new Date().toISOString();
       if (!data) {
@@ -111,23 +110,23 @@ itHomeRouter.get("/ithome", async (ctx) => {
   }
 });
 
-// IT之家热榜 - 获取最新数据
-itHomeRouter.get("/ithome/new", async (ctx) => {
-  console.log("获取IT之家热榜 - 最新数据");
+// 快手热榜 - 获取最新数据
+kuaishouRouter.get("/kuaishou/new", async (ctx) => {
+  console.log("获取快手热榜 - 最新数据");
   try {
     // 从服务器拉取最新数据
-    const response = await axios.get(url, { headers });
+    const response = await axios.get(url);
     const newData = getData(response.data);
     updateTime = new Date().toISOString();
-    console.log("从服务端重新获取IT之家热榜");
+    console.log("从服务端重新获取快手热榜");
 
     // 返回最新数据
     ctx.body = {
       code: 200,
       message: "获取成功",
       ...routerInfo,
-      updateTime,
       total: newData.length,
+      updateTime,
       data: newData,
     };
 
@@ -159,5 +158,5 @@ itHomeRouter.get("/ithome/new", async (ctx) => {
   }
 });
 
-itHomeRouter.info = routerInfo;
-module.exports = itHomeRouter;
+kuaishouRouter.info = routerInfo;
+module.exports = kuaishouRouter;
